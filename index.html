@@ -2375,6 +2375,54 @@ button{cursor:pointer}
 .top-controls{
   background:#eee9e2!important;
 }
+
+/* Cross-platform color picker. Keeps the original compact swatch controls. */
+.site-color-trigger{
+  width:30px;height:30px;padding:0;border:1px solid rgba(0,0,0,.18);
+  border-radius:8px;background:var(--swatch,#fff);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.45);
+  vertical-align:middle;
+}
+.site-color-popover{
+  position:fixed;z-index:180;width:min(286px,calc(100vw - 16px));
+  padding:10px;background:#fff;border:1px solid var(--line);
+  border-radius:14px;box-shadow:0 14px 38px rgba(0,0,0,.22);
+}
+.site-color-sv{
+  width:100%;aspect-ratio:1.8/1;display:block;border-radius:10px;
+  touch-action:none;cursor:crosshair;
+}
+.site-color-hue{
+  position:relative;height:24px;margin-top:9px;border-radius:999px;
+  background:linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00);
+  touch-action:none;cursor:pointer;
+}
+.site-color-knob{
+  position:absolute;width:18px;height:18px;border:2px solid #fff;
+  border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.45),0 2px 5px rgba(0,0,0,.25);
+  transform:translate(-50%,-50%);pointer-events:none;
+}
+.site-color-hue .site-color-knob{top:50%}
+.site-color-row{display:flex;gap:7px;align-items:center;margin-top:9px}
+.site-color-preview{
+  width:36px;height:36px;flex:0 0 36px;border-radius:9px;
+  border:1px solid rgba(0,0,0,.18);background:var(--swatch,#fff)
+}
+.site-color-hex{
+  min-width:0;flex:1;height:36px;border:1px solid var(--line);
+  border-radius:9px;padding:0 9px;font-size:16px;text-transform:uppercase
+}
+.site-color-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end}
+.site-color-actions button{
+  min-height:34px;padding:0 11px;border:1px solid var(--line);
+  border-radius:9px;background:#f7f3ee;font-size:12px;font-weight:800
+}
+@media (max-width:720px){
+  .site-color-trigger{width:34px;height:34px}
+  .site-color-popover{padding:11px}
+  .site-color-hue{height:28px}
+  .site-color-actions button{min-height:40px;font-size:14px}
+}
 </style>
 </head>
 <body>
@@ -3711,6 +3759,230 @@ function renderPaletteApplyMenu(anchor,hex){
   menu.style.top=`${Math.max(8,top)}px`;
 }
 
+
+let activeSiteColorPopover=null;
+
+function closeSiteColorPopover(){
+  if(activeSiteColorPopover){
+    activeSiteColorPopover.remove();
+    activeSiteColorPopover=null;
+  }
+}
+
+function clamp01(v){return Math.max(0,Math.min(1,v));}
+
+function hexToRgb(hex){
+  const m=String(hex||'').trim().match(/^#?([0-9a-f]{6})$/i);
+  if(!m)return {r:255,g:255,b:255};
+  return {
+    r:parseInt(m[1].slice(0,2),16),
+    g:parseInt(m[1].slice(2,4),16),
+    b:parseInt(m[1].slice(4,6),16)
+  };
+}
+
+function rgbToHex(r,g,b){
+  return '#'+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+}
+
+function rgbToHsv(r,g,b){
+  r/=255;g/=255;b/=255;
+  const max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min;
+  let h=0;
+  if(d){
+    if(max===r)h=((g-b)/d)%6;
+    else if(max===g)h=(b-r)/d+2;
+    else h=(r-g)/d+4;
+    h*=60;if(h<0)h+=360;
+  }
+  return {h,s:max===0?0:d/max,v:max};
+}
+
+function hsvToRgb(h,s,v){
+  h=((h%360)+360)%360;
+  const c=v*s,x=c*(1-Math.abs((h/60)%2-1)),m=v-c;
+  let rp=0,gp=0,bp=0;
+  if(h<60){rp=c;gp=x}
+  else if(h<120){rp=x;gp=c}
+  else if(h<180){gp=c;bp=x}
+  else if(h<240){gp=x;bp=c}
+  else if(h<300){rp=x;bp=c}
+  else{rp=c;bp=x}
+  return {r:(rp+m)*255,g:(gp+m)*255,b:(bp+m)*255};
+}
+
+function normalizeSiteHex(v){
+  v=String(v||'').trim();
+  if(!v.startsWith('#'))v='#'+v;
+  if(/^#[0-9a-f]{3}$/i.test(v))v='#'+v.slice(1).split('').map(c=>c+c).join('');
+  return /^#[0-9a-f]{6}$/i.test(v)?v.toLowerCase():null;
+}
+
+function makeSiteColorControl(value,onApply,title='색상'){
+  const trigger=document.createElement('button');
+  trigger.type='button';
+  trigger.className='site-color-trigger';
+  trigger.title=title;
+  trigger.setAttribute('aria-label',title);
+  trigger.style.setProperty('--swatch',value||'#ffffff');
+
+  trigger.onclick=(e)=>{
+    e.stopPropagation();
+    closeSiteColorPopover();
+
+    const rgb=hexToRgb(value||'#ffffff');
+    let hsv=rgbToHsv(rgb.r,rgb.g,rgb.b);
+
+    const pop=document.createElement('div');
+    pop.className='site-color-popover';
+
+    const canvas=document.createElement('canvas');
+    canvas.className='site-color-sv';
+    canvas.width=520;
+    canvas.height=290;
+
+    const svKnob=document.createElement('div');
+    svKnob.className='site-color-knob';
+    svKnob.style.position='absolute';
+    const svWrap=document.createElement('div');
+    svWrap.style.position='relative';
+    svWrap.append(canvas,svKnob);
+    pop.appendChild(svWrap);
+
+    const hue=document.createElement('div');
+    hue.className='site-color-hue';
+    const hueKnob=document.createElement('div');
+    hueKnob.className='site-color-knob';
+    hue.appendChild(hueKnob);
+    pop.appendChild(hue);
+
+    const row=document.createElement('div');
+    row.className='site-color-row';
+    const preview=document.createElement('div');
+    preview.className='site-color-preview';
+    const hex=document.createElement('input');
+    hex.className='site-color-hex';
+    hex.type='text';
+    hex.inputMode='text';
+    row.append(preview,hex);
+    pop.appendChild(row);
+
+    const actions=document.createElement('div');
+    actions.className='site-color-actions';
+    const cancel=document.createElement('button');
+    cancel.type='button';cancel.textContent='취소';
+    const apply=document.createElement('button');
+    apply.type='button';apply.textContent='적용';
+    actions.append(cancel,apply);
+    pop.appendChild(actions);
+
+    function currentHex(){
+      const c=hsvToRgb(hsv.h,hsv.s,hsv.v);
+      return rgbToHex(c.r,c.g,c.b);
+    }
+
+    function drawSV(){
+      const ctx=canvas.getContext('2d');
+      const hueRgb=hsvToRgb(hsv.h,1,1);
+      const base=rgbToHex(hueRgb.r,hueRgb.g,hueRgb.b);
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      const gx=ctx.createLinearGradient(0,0,canvas.width,0);
+      gx.addColorStop(0,'#fff');gx.addColorStop(1,base);
+      ctx.fillStyle=gx;ctx.fillRect(0,0,canvas.width,canvas.height);
+      const gy=ctx.createLinearGradient(0,0,0,canvas.height);
+      gy.addColorStop(0,'rgba(0,0,0,0)');gy.addColorStop(1,'#000');
+      ctx.fillStyle=gy;ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+
+    function syncUI(){
+      drawSV();
+      const hx=currentHex();
+      hex.value=hx.toUpperCase();
+      preview.style.setProperty('--swatch',hx);
+      svKnob.style.left=`${hsv.s*100}%`;
+      svKnob.style.top=`${(1-hsv.v)*100}%`;
+      hueKnob.style.left=`${(hsv.h/360)*100}%`;
+    }
+
+    function pointIn(el,ev){
+      const r=el.getBoundingClientRect();
+      return {
+        x:clamp01((ev.clientX-r.left)/r.width),
+        y:clamp01((ev.clientY-r.top)/r.height)
+      };
+    }
+
+    function bindDrag(el,move){
+      const handler=(ev)=>{
+        ev.preventDefault();
+        move(pointIn(el,ev));
+      };
+      el.addEventListener('pointerdown',ev=>{
+        el.setPointerCapture?.(ev.pointerId);
+        handler(ev);
+      });
+      el.addEventListener('pointermove',ev=>{
+        if(ev.buttons||ev.pressure>0)handler(ev);
+      });
+    }
+
+    bindDrag(canvas,p=>{
+      hsv.s=p.x;hsv.v=1-p.y;syncUI();
+    });
+    bindDrag(hue,p=>{
+      hsv.h=p.x*360;syncUI();
+    });
+
+    hex.onchange=()=>{
+      const valid=normalizeSiteHex(hex.value);
+      if(!valid){syncUI();return;}
+      const c=hexToRgb(valid);
+      hsv=rgbToHsv(c.r,c.g,c.b);
+      syncUI();
+    };
+    hex.onkeydown=ev=>{
+      if(ev.key==='Enter'){
+        ev.preventDefault();
+        const valid=normalizeSiteHex(hex.value);
+        if(valid){
+          onApply(valid);
+          closeSiteColorPopover();
+          queuePersist(0);
+          render();
+        }
+      }
+    };
+
+    cancel.onclick=()=>closeSiteColorPopover();
+    apply.onclick=()=>{
+      const hx=currentHex();
+      onApply(hx);
+      closeSiteColorPopover();
+      queuePersist(0);
+      render();
+    };
+
+    document.body.appendChild(pop);
+    const r=trigger.getBoundingClientRect();
+    const pw=pop.offsetWidth||286,ph=pop.offsetHeight||330;
+    let left=Math.max(8,Math.min(window.innerWidth-pw-8,r.left));
+    let top=r.bottom+6;
+    if(top+ph>window.innerHeight-8)top=Math.max(8,r.top-ph-6);
+    pop.style.left=`${left}px`;
+    pop.style.top=`${top}px`;
+    activeSiteColorPopover=pop;
+    syncUI();
+  };
+
+  return trigger;
+}
+
+async function ensureNovelFontsAvailable(){
+  if(!document.fonts)return;
+  await Promise.allSettled(NOVEL_FONTS.map(f=>document.fonts.load(`16px ${f.css}`)));
+  await document.fonts.ready.catch(()=>{});
+}
+
 function openSheet(){
   backdrop.classList.add('show');sheet.classList.add('show');
   const item=currentList().find(x=>x.id===state.selectedId);
@@ -3718,6 +3990,7 @@ function openSheet(){
   renderPresetSheet(item);
 }
 function closeSheet(){
+  closeSiteColorPopover();
   backdrop.classList.remove('show');sheet.classList.remove('show');
   state.sheetMode='block'
 }
@@ -3866,13 +4139,8 @@ function renderPresetSheet(p){
       colorText.textContent='색상';
       bgTools.appendChild(colorText);
 
-      const color1=document.createElement('input');
-      color1.type='color';
-      color1.className='chat-bg-color';
-      color1.value=bg.color1;
-      color1.title='배경 색';
-      color1.oninput=()=>{bg.color1=color1.value;render();};
-      color1.onchange=()=>{bg.color1=color1.value;render();openSheet();};
+      const color1=makeSiteColorControl(bg.color1,(hex)=>{bg.color1=hex;render();openSheet();},'배경 색');
+      color1.classList.add('chat-bg-color');
       bgTools.appendChild(color1);
     }
 
@@ -3882,22 +4150,12 @@ function renderPresetSheet(p){
       colorText.textContent='색상';
       bgTools.appendChild(colorText);
 
-      const color1=document.createElement('input');
-      color1.type='color';
-      color1.className='chat-bg-color';
-      color1.value=bg.color1;
-      color1.title='그라데이션 색 1';
-      color1.oninput=()=>{bg.color1=color1.value;render();};
-      color1.onchange=()=>{bg.color1=color1.value;render();openSheet();};
+      const color1=makeSiteColorControl(bg.color1,(hex)=>{bg.color1=hex;render();openSheet();},'그라데이션 색 1');
+      color1.classList.add('chat-bg-color');
       bgTools.appendChild(color1);
 
-      const color2=document.createElement('input');
-      color2.type='color';
-      color2.className='chat-bg-color';
-      color2.value=bg.color2;
-      color2.title='그라데이션 색 2';
-      color2.oninput=()=>{bg.color2=color2.value;render();};
-      color2.onchange=()=>{bg.color2=color2.value;render();openSheet();};
+      const color2=makeSiteColorControl(bg.color2,(hex)=>{bg.color2=hex;render();openSheet();},'그라데이션 색 2');
+      color2.classList.add('chat-bg-color');
       bgTools.appendChild(color2);
 
       const dir=document.createElement('select');
@@ -4188,22 +4446,14 @@ function renderPresetSheet(p){
       textRow.appendChild(fontWrap);
 
       // Text color lives immediately next to font.
-      const colorWrap=document.createElement('label');
+      const colorWrap=document.createElement('span');
       colorWrap.className='mini-color text-color-next-font';
       colorWrap.title='글자색';
-      const colorInput=document.createElement('input');
-      colorInput.type='color';
-      colorInput.value=preset.color;
-      colorInput.oninput=()=>{
-        preset.color=colorInput.value;
-        render();
-      };
-      colorInput.onchange=()=>{
-        preset.color=colorInput.value;
+      colorWrap.appendChild(makeSiteColorControl(preset.color,(hex)=>{
+        preset.color=hex;
         render();
         openSheet();
-      };
-      colorWrap.appendChild(colorInput);
+      },'글자색'));
       textRow.appendChild(colorWrap);
 
       tools.appendChild(textRow);
@@ -4254,15 +4504,14 @@ function renderPresetSheet(p){
         bubbleColorLabel.textContent='색';
         bubbleRow.appendChild(bubbleColorLabel);
 
-        const bubbleColor=document.createElement('label');
+        const bubbleColor=document.createElement('span');
         bubbleColor.className='mini-color';
         bubbleColor.title='말풍선 색';
-        const bubbleInput=document.createElement('input');
-        bubbleInput.type='color';
-        bubbleInput.value=preset.bubbleColor||'#ffffff';
-        bubbleInput.oninput=()=>{preset.bubbleColor=bubbleInput.value;render();};
-        bubbleInput.onchange=()=>{preset.bubbleColor=bubbleInput.value;render();openSheet();};
-        bubbleColor.appendChild(bubbleInput);
+        bubbleColor.appendChild(makeSiteColorControl(preset.bubbleColor||'#ffffff',(hex)=>{
+          preset.bubbleColor=hex;
+          render();
+          openSheet();
+        },'말풍선 색'));
         bubbleRow.appendChild(bubbleColor);
       }
 
@@ -4317,23 +4566,14 @@ function renderPresetSheet(p){
       };
       identityRow.appendChild(displayName);
 
-      const nameColor=document.createElement('label');
+      const nameColor=document.createElement('span');
       nameColor.className='mini-color name-color-control';
       nameColor.title='이름 색';
-      const nameColorInput=document.createElement('input');
-      nameColorInput.type='color';
-      nameColorInput.value=preset.nameColor||'#777777';
-      nameColorInput.setAttribute('aria-label','이름 색');
-      nameColorInput.oninput=()=>{
-        preset.nameColor=nameColorInput.value;
-        render();
-      };
-      nameColorInput.onchange=()=>{
-        preset.nameColor=nameColorInput.value;
+      nameColor.appendChild(makeSiteColorControl(preset.nameColor||'#777777',(hex)=>{
+        preset.nameColor=hex;
         render();
         openSheet();
-      };
-      nameColor.appendChild(nameColorInput);
+      },'이름 색'));
       identityRow.appendChild(nameColor);
 
       const nameSize=document.createElement('label');
@@ -4481,22 +4721,14 @@ function renderPresetSheet(p){
     const hlTools=document.createElement('div');
     hlTools.className='flow-row compact-fill';
 
-    const hlColor=document.createElement('label');
+    const hlColor=document.createElement('span');
     hlColor.className='mini-color';
     hlColor.title='하이라이트 색';
-    const hlColorInput=document.createElement('input');
-    hlColorInput.type='color';
-    hlColorInput.value=state.highlightColor||'#f3dfc5';
-    hlColorInput.oninput=()=>{
-      state.highlightColor=hlColorInput.value;
-      render();
-    };
-    hlColorInput.onchange=()=>{
-      state.highlightColor=hlColorInput.value;
+    hlColor.appendChild(makeSiteColorControl(state.highlightColor||'#f3dfc5',(hex)=>{
+      state.highlightColor=hex;
       render();
       openSheet();
-    };
-    hlColor.appendChild(hlColorInput);
+    },'하이라이트 색'));
 
     const hlMinus=document.createElement('button');
     hlMinus.type='button';
@@ -5549,6 +5781,7 @@ document.getElementById('shareBtn').onclick=async()=>{
 
 async function bootApp(){
   await hydratePrimaryState();
+  await ensureNovelFontsAvailable();
   syncFontTopUI();
   syncRatioUI();
   syncAlignUI();
