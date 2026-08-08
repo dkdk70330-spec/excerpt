@@ -5794,21 +5794,31 @@ function renderModalPalette(){
 function applyPickedColor(hex){
   addSavedColor(hex);
 }
-function sampleColor(e){
-  if(!colorImageCanvas.width)return;
+
+let pendingSampleColor=null;
+
+function sampleColor(e,{commit=false}={}){
+  if(!colorImageCanvas.width)return null;
   const rect=colorImageCanvas.getBoundingClientRect();
   const cx=e.clientX,cy=e.clientY;
   let x=(cx-rect.left)*(colorImageCanvas.width/rect.width);
   let y=(cy-rect.top)*(colorImageCanvas.height/rect.height);
   x=Math.max(0,Math.min(colorImageCanvas.width-1,Math.floor(x)));
   y=Math.max(0,Math.min(colorImageCanvas.height-1,Math.floor(y)));
+
   const px=colorImageCtx.getImageData(x,y,1,1).data;
   const hex=rgbToHex(px[0],px[1],px[2]);
-  applyPickedColor(hex);
+  pendingSampleColor=hex;
+
+  // Dragging only previews the sampled color.
   colorSample.style.display='block';
   colorSample.style.left=(cx-rect.left)+'px';
   colorSample.style.top=(cy-rect.top)+'px';
-  colorSample.style.background=hex
+  colorSample.style.background=hex;
+
+  // Add exactly once, when the pointer is released.
+  if(commit)applyPickedColor(hex);
+  return hex;
 }
 document.getElementById('colorImageClose').onclick=()=>{
   closeImageColorPicker();
@@ -5827,10 +5837,26 @@ colorImageInput.onchange=()=>{
   };
   img.src=url
 };
-colorImageCanvas.addEventListener('pointerdown',e=>{sampling=true;colorImageCanvas.setPointerCapture?.(e.pointerId);sampleColor(e)});
-colorImageCanvas.addEventListener('pointermove',e=>{if(sampling)sampleColor(e)});
-colorImageCanvas.addEventListener('pointerup',e=>{if(sampling)sampleColor(e);sampling=false});
-colorImageCanvas.addEventListener('pointercancel',()=>sampling=false);
+colorImageCanvas.addEventListener('pointerdown',e=>{
+  sampling=true;
+  pendingSampleColor=null;
+  colorImageCanvas.setPointerCapture?.(e.pointerId);
+  sampleColor(e);
+});
+colorImageCanvas.addEventListener('pointermove',e=>{
+  if(sampling)sampleColor(e);
+});
+colorImageCanvas.addEventListener('pointerup',e=>{
+  if(!sampling)return;
+  sampleColor(e,{commit:true});
+  sampling=false;
+  pendingSampleColor=null;
+  try{colorImageCanvas.releasePointerCapture?.(e.pointerId)}catch(_){}
+});
+colorImageCanvas.addEventListener('pointercancel',()=>{
+  sampling=false;
+  pendingSampleColor=null;
+});
 
 function spacedTextWidth(ctx,text,spacingPx=0){
   const chars=[...String(text||'')];
