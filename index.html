@@ -2423,6 +2423,49 @@ button{cursor:pointer}
   .site-color-hue{height:28px}
   .site-color-actions button{min-height:40px;font-size:14px}
 }
+
+/* Functional groups wrap as units, never in the middle. */
+.toolbar-unit{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  flex:0 0 auto;
+  flex-wrap:nowrap;
+  white-space:nowrap;
+  min-width:max-content;
+}
+.toolbar-unit.credit-unit .bg-credit-input{
+  flex:0 0 118px!important;
+  width:118px;
+  min-width:88px!important;
+  max-width:118px;
+}
+.toolbar-unit.replace-unit .replace-input{
+  flex:0 0 86px!important;
+  width:86px;
+  min-width:62px;
+  max-width:86px;
+}
+@media(max-width:520px){
+  .toolbar-unit.credit-unit .bg-credit-input{
+    flex-basis:104px!important;
+    width:104px;
+  }
+  .toolbar-unit.replace-unit .replace-input{
+    flex-basis:76px!important;
+    width:76px;
+  }
+}
+@media(max-width:380px){
+  .toolbar-unit.credit-unit .bg-credit-input{
+    flex-basis:94px!important;
+    width:94px;
+  }
+  .toolbar-unit.replace-unit .replace-input{
+    flex-basis:68px!important;
+    width:68px;
+  }
+}
 </style>
 </head>
 <body>
@@ -4250,7 +4293,10 @@ function renderPresetSheet(p){
       openSheet();
     };
 
-    bgTools.append(creditMiniLabel,creditInput);
+    const creditUnit=document.createElement('div');
+    creditUnit.className='toolbar-unit credit-unit';
+    creditUnit.append(creditMiniLabel,creditInput);
+    bgTools.appendChild(creditUnit);
     bgLine.append(bgLabel,bgTools);
     sheetContent.appendChild(bgLine);
 
@@ -4833,7 +4879,10 @@ function renderPresetSheet(p){
     openSheet();
   };
 
-  moveGroup.append(replaceInlineLabel,findInput,arrow,replaceInput,addReplace);
+  const replaceUnit=document.createElement('div');
+  replaceUnit.className='toolbar-unit replace-unit';
+  replaceUnit.append(replaceInlineLabel,findInput,arrow,replaceInput,addReplace);
+  moveGroup.appendChild(replaceUnit);
   moveLine.append(moveLabel,moveGroup);
   sheetContent.appendChild(moveLine);
 
