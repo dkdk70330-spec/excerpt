@@ -2466,6 +2466,33 @@ button{cursor:pointer}
     width:68px;
   }
 }
+
+/* Fixed-layout excerpt paper.
+   Responsive behavior scales the finished 720px page as a whole.
+   It must never reflow text because the browser viewport became narrower. */
+.canvas-pages{
+  width:720px!important;
+  min-width:720px!important;
+  max-width:none!important;
+  align-items:stretch!important;
+  margin-left:auto!important;
+  margin-right:auto!important;
+  transform-origin:top center;
+}
+.preview-stack > .canvas-pages{
+  width:720px!important;
+  min-width:720px!important;
+  max-width:none!important;
+}
+.preview-page{
+  width:720px!important;
+  min-width:720px!important;
+  max-width:720px!important;
+  box-sizing:border-box!important;
+}
+.preview-stack{
+  overflow:hidden;
+}
 </style>
 </head>
 <body>
@@ -3304,6 +3331,32 @@ function applyPageBackgroundPreview(page){
   }
 }
 
+
+const PREVIEW_LOGICAL_WIDTH=720;
+const EXPORT_WIDTH=1080;
+const EXPORT_SCALE=EXPORT_WIDTH/PREVIEW_LOGICAL_WIDTH;
+
+function syncPreviewPaperScale(){
+  if(!canvas||!canvas.classList.contains('canvas-pages'))return;
+  const host=canvas.parentElement;
+  if(!host)return;
+
+  // Measure the real responsive slot, but never feed that width into text layout.
+  const styles=getComputedStyle(host);
+  const available=Math.max(
+    1,
+    host.clientWidth
+      -(parseFloat(styles.paddingLeft)||0)
+      -(parseFloat(styles.paddingRight)||0)
+  );
+  const scale=Math.min(1,available/PREVIEW_LOGICAL_WIDTH);
+
+  // `zoom` scales layout and hit targets together while preserving the
+  // 720px logical coordinate system used for text wrapping/pagination.
+  canvas.style.zoom=String(scale);
+  canvas.dataset.previewScale=String(scale);
+}
+
 function createPreviewPage(pageIndex){
   const page=document.createElement('section');
   page.className='canvas novel preview-page';
@@ -3316,7 +3369,8 @@ function createPreviewPage(pageIndex){
   applyPageBackgroundPreview(page);
 
   requestAnimationFrame(()=>{
-    const pageW=page.clientWidth;
+    syncPreviewPaperScale();
+    const pageW=PREVIEW_LOGICAL_WIDTH;
     const leftPad=pageW*(state[margins.left]/100);
     page.style.setProperty('--role-chip-page-offset',`${leftPad+6}px`);
   });
@@ -3378,6 +3432,16 @@ function finalizePreviewPageAlignment(){
 }
 
 
+
+
+let previewScaleResizeRAF=0;
+window.addEventListener('resize',()=>{
+  cancelAnimationFrame(previewScaleResizeRAF);
+  previewScaleResizeRAF=requestAnimationFrame(()=>{
+    syncPreviewPaperScale();
+    layoutRoleChipRail();
+  });
+});
 
 function resolvedCreditText(){
   return String(state.creditText||'').trim();
@@ -3610,6 +3674,7 @@ function render(){  document.querySelector('.canvas-shell')?.classList.add('nove
 
   state.previewPageCount=pageIndex+1;
   finalizePreviewPageAlignment();
+  syncPreviewPaperScale();
   requestAnimationFrame(layoutRoleChipRail);
   queuePersist();
 }
@@ -5548,11 +5613,9 @@ function previewVisualForParagraph(p){
 }
 
 function drawExport(pageNumber=0){
-  const W=1080;
+  const W=EXPORT_WIDTH;
   const H=state.exportRatio==='1:1'?1080:state.exportRatio==='2:3'?1620:1440;
-  const previewPage=canvas.querySelector('.preview-page');
-  const previewWidth=Math.max(1,previewPage?.getBoundingClientRect().width||previewPage?.clientWidth||720);
-  const exportScale=W/previewWidth;
+  const exportScale=EXPORT_SCALE;
   const c=document.createElement('canvas');c.width=W;c.height=H;
   const ctx=c.getContext('2d');
   drawPageBackground(ctx,W,H);
@@ -5736,10 +5799,10 @@ function previewExportGeometryAudit(){
   const cs=getComputedStyle(page);
   const margins=currentMarginKeys();
   const expected={
-    left:rect.width*(state[margins.left]/100),
-    right:rect.width*(state[margins.right]/100),
-    top:rect.width*(state[margins.top]/100),
-    bottom:rect.width*(state[margins.bottom]/100)
+    left:PREVIEW_LOGICAL_WIDTH*(state[margins.left]/100),
+    right:PREVIEW_LOGICAL_WIDTH*(state[margins.right]/100),
+    top:PREVIEW_LOGICAL_WIDTH*(state[margins.top]/100),
+    bottom:PREVIEW_LOGICAL_WIDTH*(state[margins.bottom]/100)
   };
   const actual={
     left:parseFloat(cs.paddingLeft)||0,
