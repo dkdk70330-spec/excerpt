@@ -6151,6 +6151,7 @@ function drawExport(pageNumber=0){
       ctx.globalAlpha=1;
       textTop+=b.nameFont*1.2+b.nameGap;
       ctx.font=`${b.italic}${b.weight} ${b.font}px ${b.family}`;
+      ctx.fillStyle=b.st.color;
     }
 
     if(b.bubble){
