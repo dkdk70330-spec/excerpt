@@ -2491,7 +2491,48 @@ button{cursor:pointer}
   box-sizing:border-box!important;
 }
 .preview-stack{
-  overflow:hidden;
+  position:relative;
+  overflow:visible!important;
+}
+
+/* Role chips are editor-only UI. Keep them outside the scaled paper so they
+   stay visible, tappable and never affect/export with the page. */
+.preview-stack > .role-chip-rail{
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  z-index:25!important;
+  pointer-events:none!important;
+  overflow:visible!important;
+}
+.preview-stack > .role-chip-rail .role-tag-rail{
+  position:absolute!important;
+  width:30px!important;
+  min-width:30px!important;
+  max-width:30px!important;
+  height:20px!important;
+  min-height:20px!important;
+  margin:0!important;
+  padding:0 2px!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  border:1px solid #ddd7cd!important;
+  border-radius:7px!important;
+  background:#fbfaf7!important;
+  box-shadow:0 1px 4px rgba(0,0,0,.05)!important;
+  color:#777!important;
+  font-size:8px!important;
+  font-weight:800!important;
+  line-height:1!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  visibility:visible!important;
+  pointer-events:auto!important;
+  cursor:pointer!important;
+  transform:none!important;
+  zoom:1!important;
 }
 </style>
 </head>
@@ -3384,15 +3425,19 @@ function previewPageOverflows(page){
 
 
 function layoutRoleChipRail(){
-  let rail=canvas.querySelector(':scope > .role-chip-rail');
+  const host=canvas.parentElement;
+  if(!host)return;
+
+  // Rail is a sibling of the zoomed 720px paper, not a child of it.
+  let rail=host.querySelector(':scope > .role-chip-rail');
   if(!rail){
     rail=document.createElement('div');
     rail.className='role-chip-rail';
-    canvas.appendChild(rail);
+    host.appendChild(rail);
   }
   rail.innerHTML='';
 
-  const hostRect=canvas.getBoundingClientRect();
+  const hostRect=host.getBoundingClientRect();
 
   canvas.querySelectorAll('.preview-page .block').forEach(block=>{
     const sourceTag=block.querySelector(':scope > .role-tag');
@@ -3415,8 +3460,13 @@ function layoutRoleChipRail(){
       openSheet();
     };
 
+    // getBoundingClientRect already contains the visual page scale, so use
+    // those screen-space coordinates directly in the unscaled overlay rail.
     const br=block.getBoundingClientRect();
+    const page=block.closest('.preview-page');
+    const pr=page?.getBoundingClientRect();
     clone.style.top=`${br.top-hostRect.top+1}px`;
+    clone.style.left=`${Math.max(2,(pr?pr.left-hostRect.left:0)-36)}px`;
     rail.appendChild(clone);
     sourceTag.style.visibility='hidden';
   });
