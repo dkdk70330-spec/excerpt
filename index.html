@@ -7,9 +7,6 @@
 <meta name="theme-color" content="#ebe5dd">
 <title>발췌기</title>
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=East+Sea+Dokdo&amp;family=Gaegu:wght@300;400;700&amp;family=Gamja+Flower&amp;family=Gowun+Batang:wght@400;700&amp;family=Gowun+Dodum&amp;family=Hahmlet:wght@400;500;600;700&amp;family=Noto+Sans+KR:wght@400;500;600;700&amp;family=Noto+Serif+KR:wght@400;500;600;700&amp;family=Song+Myung&amp;family=Yeon+Sung&amp;display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#ebe5dd;
@@ -57,21 +54,29 @@ button{cursor:pointer}
 }
 .block + .block{margin-top:18px}
 .block.selected{
-  background:rgba(0,0,0,.035);
-  box-shadow:0 0 0 1px rgba(0,0,0,.08) inset
+  background:transparent!important;
+  box-shadow:0 0 0 1px rgba(70,70,70,.22) inset!important;
 }
 .novel .block{font-size:20px;line-height:1.82;letter-spacing:-.02em}
 .novel .block + .block{margin-top:26px}
 .block.center{text-align:center}
 .block.right{text-align:right}
-.effect-emphasis{font-weight:800!important;font-size:1.10em}
-.effect-quote{padding-left:18px;border-left:3px solid currentColor}
 .highlight-text{
-  background:#f3dfc5;
-  padding:0 3px 2px;
-  border-radius:4px;
+  display:inline;
+  padding:0;
+  border-radius:0;
   box-decoration-break:clone;
-  -webkit-box-decoration-break:clone
+  -webkit-box-decoration-break:clone;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent var(--hl-start,0%),
+      var(--hl-color,#f3dfc5) var(--hl-start,0%),
+      var(--hl-color,#f3dfc5) var(--hl-end,100%),
+      transparent var(--hl-end,100%),
+      transparent 100%
+    )!important;
 }
 .role-tag{
   display:inline-flex;
@@ -2534,6 +2539,37 @@ button{cursor:pointer}
   transform:none!important;
   zoom:1!important;
 }
+
+.highlight-inline-line{
+  align-items:center!important;
+}
+.highlight-inline-tools{
+  flex-wrap:nowrap!important;
+  overflow-x:auto;
+  scrollbar-width:none;
+}
+.highlight-inline-tools::-webkit-scrollbar{display:none}
+.highlight-inline-tools > *{
+  flex:0 0 auto;
+}
+
+.paragraph-override-tools{
+  align-items:center;
+}
+.paragraph-override-tools .font-select{
+  max-width:92px;
+}
+.paragraph-preset-reset{
+  font-size:15px!important;
+}
+
+/* Section labels only: clearer hierarchy, same layout. */
+.compact-line > .compact-label{
+  font-size:11.5px!important;
+  font-weight:900!important;
+  color:#3f3f42!important;
+  letter-spacing:-0.02em;
+}
 </style>
 </head>
 <body>
@@ -2644,6 +2680,7 @@ const state={
   creditText:'@excerpt',
   highlightColor:'#f3dfc5',
   highlightOpacity:1,
+  highlightPosition:'default',
   previewPageCount:1,
   previewCreditPage:-1,
   selectedId:null,
@@ -2678,7 +2715,7 @@ const state={
   },
 
   novel:[
-    {id:id(),text:'더블엔터 = 문단나누기 / <-backspace = 문단합치기 / 왼쪽 칩 클릭 = 설정창 열기 / 스포이드로 추출하고 팔레트에 담긴 색을 꾹 누르면 삭제됨 / 프리셋 누르고 팔레트 클릭 하면 해당 색으로 변경 가능',role:'common',effect:'none',override:{}}
+    {id:id(),text:'더블엔터 = 문단나누기 / <-backspace = 문단합치기 / 왼쪽 칩 클릭 = 설정창 열기 / 스포이드로 추출하고 팔레트에 담긴 색을 꾹 누르면 삭제됨 / 프리셋 누르고 팔레트 클릭 하면 해당 색으로 변경 가능',role:'common',effect:'none',override:{},highlights:[]}
   ]
 };
 
@@ -2727,6 +2764,17 @@ function migrateLegacyDemoContent(){
 }
 
 function sanitizeStateStructure(){
+  normalizeAllPresetFonts();
+  state.highlightPosition=state.highlightPosition==='lower'?'lower':'default';
+
+  // Remove only the obsolete bundled replacement sample from older saved states.
+  // User-created replacement rules remain untouched.
+  if(Array.isArray(state.replacements)){
+    state.replacements=state.replacements.filter(r=>!(
+      String(r?.find??'')==='안' && String(r?.replace??'')==='ㅇ'
+    ));
+  }
+
   if(!Array.isArray(state.npcs)||!state.npcs.length){
     state.npcs=[{id:npc1,name:'NPC 1'}];
   }
@@ -2737,12 +2785,21 @@ function sanitizeStateStructure(){
   state.novel=state.novel.map(p=>{
     const role=String(p?.role||'common');
     const m=/^npc:([^:]+):(dialogue|action)$/.exec(role);
+    const paragraphText=String(p?.text??'');
+    const legacyWasHighlight=p?.effect==='highlight';
     return {
       id:p?.id||id(),
-      text:String(p?.text??''),
+      text:paragraphText,
       role:m?`npc:${mainNpcId}:${m[2]}`:role,
-      effect:['none','emphasis','quote','highlight'].includes(p?.effect)?p.effect:'none',
-      override:(p?.override&&typeof p.override==='object')?p.override:{}
+      effect:'none',
+      override:(()=>{
+        const o=(p?.override&&typeof p.override==='object')?{...p.override}:{};
+        if(Object.prototype.hasOwnProperty.call(o,'font'))o.font=normalizeFontKey(o.font);
+        return o;
+      })(),
+      highlights:legacyWasHighlight
+        ? [{start:0,end:paragraphText.length,...currentHighlightStyle()}]
+        : normalizeHighlightRanges(p?.highlights,paragraphText.length)
     };
   });
 
@@ -2782,6 +2839,7 @@ function buildPersistedState(){
     creditText:state.creditText,
     highlightColor:state.highlightColor,
     highlightOpacity:state.highlightOpacity,
+    highlightPosition:state.highlightPosition,
     savedColors:state.savedColors,
     replacements:state.replacements,
     npcs:state.npcs,
@@ -2872,7 +2930,7 @@ function applyPersistedState(data){
   [
     'exportRatio','verticalAlign','novelFontSize','novelLetterSpacing','novelLineHeight',
     'novelMarginTop','novelMarginRight','novelMarginBottom','novelMarginLeft',
-    'creditText','highlightColor','highlightOpacity',
+    'creditText','highlightColor','highlightOpacity','highlightPosition',
     'savedColors','replacements','npcs','rolePresets','npcPresets','customRolePresets',
     'pageBackground','novel'
   ].forEach(key=>{
@@ -3249,14 +3307,33 @@ function currentComputedStyle(p){
     color:'#181818',bold:false,italic:false,align:'left',quote:false,font:'sans',
     name:'',nameColor:'#777777',nameScale:0.62,profileImage:'',profileScale:1.55,bubble:false,bubbleColor:'#ffffff',bubbleStyle:'rounded'
   };
+  const o=(p?.override&&typeof p.override==='object')?p.override:{};
   return {
-    color:base.color,
-    bold:base.bold,
-    italic:base.italic,
-    align:base.align,
+    color:o.color ?? base.color,
+    bold:o.bold ?? base.bold,
+    italic:o.italic ?? base.italic,
+    align:o.align ?? base.align,
     quote:!!base.quote,
-    font:base.font||'sans'
+    font:normalizeFontKey(o.font ?? base.font ?? 'sans')
   };
+}
+
+function setParagraphOverride(p,key,value){
+  if(!p.override||typeof p.override!=='object')p.override={};
+  const base=getRolePreset(p.role)||{};
+  const normalizedValue=key==='font'?normalizeFontKey(value):value;
+  const baseValue=key==='font'?normalizeFontKey(base[key]??'sans'):base[key];
+
+  if(normalizedValue===baseValue){
+    delete p.override[key];
+  }else{
+    p.override[key]=normalizedValue;
+  }
+}
+
+function paragraphHasOverrides(p){
+  const o=(p?.override&&typeof p.override==='object')?p.override:{};
+  return ['color','bold','italic','align','font'].some(k=>Object.prototype.hasOwnProperty.call(o,k));
 }
 function applyTextReplacements(value){
   let out=String(value??'');
@@ -3277,24 +3354,37 @@ function normalizeCurrentRoleQuotes(role){
 }
 
 const NOVEL_FONTS = [
-  {key:'sans', label:'기본', css:'"Noto Sans KR",sans-serif'},
-  {key:'dotum', label:'돋움', css:'"Gowun Dodum",sans-serif'},
-  {key:'serif', label:'명조', css:'"Noto Serif KR",serif'},
-  {key:'batang', label:'바탕', css:'"Gowun Batang",serif'},
-  {key:'classic', label:'고전 명조', css:'"Song Myung",serif'},
-  {key:'literary', label:'문학체', css:'"Hahmlet",serif'},
-  {key:'cute', label:'귀여운 손글씨', css:'"Gamja Flower",cursive'},
-  {key:'hand', label:'손글씨', css:'"Gaegu",cursive'},
-  {key:'adult-hand', label:'어른 손글씨', css:'"Yeon Sung",cursive'},
-  {key:'brush', label:'붓글씨', css:'"East Sea Dokdo",cursive', scale:1.35}
+  {key:'sans', label:'시스템', css:'system-ui,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans CJK KR","Noto Sans KR",sans-serif'},
+  {key:'serif', label:'명조', css:'"AppleMyungjo","NanumMyeongjo","Noto Serif CJK KR","Noto Serif KR",serif'},
+  {key:'batang', label:'바탕', css:'"Batang","바탕","AppleMyungjo","Noto Serif CJK KR",serif'},
+  {key:'dotum', label:'돋움', css:'"Dotum","돋움","Apple SD Gothic Neo","Noto Sans CJK KR",sans-serif'},
+  {key:'gulim', label:'굴림', css:'"Gulim","굴림","Apple SD Gothic Neo","Noto Sans CJK KR",sans-serif'}
 ]
 
+function normalizeFontKey(key){
+  const k=String(key||'sans');
+  if(['sans','serif','batang','dotum','gulim'].includes(k))return k;
+  if(['classic','literary'].includes(k))return 'serif';
+  return 'sans';
+}
+
+function normalizeAllPresetFonts(){
+  Object.values(state.rolePresets||{}).forEach(p=>{if(p)p.font=normalizeFontKey(p.font);});
+  Object.values(state.customRolePresets||{}).forEach(p=>{if(p)p.font=normalizeFontKey(p.font);});
+  Object.values(state.npcPresets||{}).forEach(pair=>{
+    if(pair?.dialogue)pair.dialogue.font=normalizeFontKey(pair.dialogue.font);
+    if(pair?.action)pair.action.font=normalizeFontKey(pair.action.font);
+  });
+}
+
 function fontCss(key){
-  return NOVEL_FONTS.find(f=>f.key===key)?.css || NOVEL_FONTS[0].css;
+  const normalized=normalizeFontKey(key);
+  return NOVEL_FONTS.find(f=>f.key===normalized)?.css || NOVEL_FONTS[0].css;
 }
 
 function fontScale(key){
-  return NOVEL_FONTS.find(f=>f.key===key)?.scale || 1;
+  const normalized=normalizeFontKey(key);
+  return NOVEL_FONTS.find(f=>f.key===normalized)?.scale || 1;
 }
 
 
@@ -3308,13 +3398,254 @@ function stripNovelQuoteCharsKeepLayout(value){
   return String(value??'').replace(QUOTE_CHARS_RE,'');
 }
 
-function effectClass(effect){
-  if(effect==='emphasis')return 'effect-emphasis';
-  if(effect==='quote')return 'effect-quote';
-  return '';
+function effectClass(){return '';}
+
+
+
+
+let activeHighlightSelection=null;
+
+function normalizeHighlightRanges(ranges,textLength){
+  const max=Math.max(0,Number(textLength)||0);
+  const fallbackColor=state.highlightColor||'#f3dfc5';
+  const fallbackOpacity=Math.max(0.1,Math.min(1,Number(state.highlightOpacity)||1));
+  const fallbackPosition=state.highlightPosition==='lower'?'lower':'default';
+
+  const cleaned=(Array.isArray(ranges)?ranges:[])
+    .map(r=>({
+      start:Math.max(0,Math.min(max,Number(r?.start)||0)),
+      end:Math.max(0,Math.min(max,Number(r?.end)||0)),
+      color:/^#[0-9a-f]{6}$/i.test(String(r?.color||''))?String(r.color):fallbackColor,
+      opacity:Math.max(0.1,Math.min(1,Number(r?.opacity ?? fallbackOpacity))),
+      position:r?.position==='lower'?'lower':'default'
+    }))
+    .filter(r=>r.end>r.start)
+    .sort((a,b)=>a.start-b.start||a.end-b.end);
+
+  // Preserve different styles. Merge only adjacent/overlapping ranges
+  // that have exactly the same highlight appearance.
+  const merged=[];
+  for(const r of cleaned){
+    const last=merged[merged.length-1];
+    const sameStyle=last
+      && last.color===r.color
+      && last.opacity===r.opacity
+      && last.position===r.position;
+
+    if(sameStyle && r.start<=last.end){
+      last.end=Math.max(last.end,r.end);
+    }else{
+      merged.push({...r});
+    }
+  }
+  return merged;
 }
 
+function currentHighlightStyle(){
+  return {
+    color:/^#[0-9a-f]{6}$/i.test(String(state.highlightColor||''))
+      ? String(state.highlightColor)
+      : '#f3dfc5',
+    opacity:Math.max(0.1,Math.min(1,Number(state.highlightOpacity)||1)),
+    position:state.highlightPosition==='lower'?'lower':'default'
+  };
+}
 
+function rgbaFromHighlightRange(r){
+  const hc=r?.color||'#f3dfc5';
+  const hr=parseInt(hc.slice(1,3),16);
+  const hg=parseInt(hc.slice(3,5),16);
+  const hb=parseInt(hc.slice(5,7),16);
+  return `rgba(${hr},${hg},${hb},${Math.max(0.1,Math.min(1,Number(r?.opacity)||1))})`;
+}
+
+function addHighlightRange(p,start,end){
+  const shown=currentDisplayText(p);
+  const max=shown.length;
+  start=Math.max(0,Math.min(max,Number(start)||0));
+  end=Math.max(0,Math.min(max,Number(end)||0));
+  if(end<=start)return;
+
+  const ranges=normalizeHighlightRanges(p.highlights,max);
+  const next=[];
+
+  // The newly selected range replaces styling only inside its own bounds.
+  for(const r of ranges){
+    if(end<=r.start || start>=r.end){
+      next.push(r);
+      continue;
+    }
+    if(r.start<start){
+      next.push({...r,end:start});
+    }
+    if(r.end>end){
+      next.push({...r,start:end});
+    }
+  }
+
+  next.push({start,end,...currentHighlightStyle()});
+  p.highlights=normalizeHighlightRanges(next,max);
+}
+
+function removeHighlightRange(p,start,end){
+  const shown=currentDisplayText(p);
+  const max=shown.length;
+  start=Math.max(0,Math.min(max,Number(start)||0));
+  end=Math.max(0,Math.min(max,Number(end)||0));
+  if(end<=start)return;
+
+  const ranges=normalizeHighlightRanges(p.highlights,max);
+  const next=[];
+
+  // Delete only the dragged overlap and keep untouched fragments/styles.
+  for(const r of ranges){
+    if(end<=r.start || start>=r.end){
+      next.push(r);
+      continue;
+    }
+    if(start>r.start)next.push({...r,end:start});
+    if(end<r.end)next.push({...r,start:end});
+  }
+  p.highlights=normalizeHighlightRanges(next,max);
+}
+
+function renderHighlightedText(body,p,shown){
+  const ranges=normalizeHighlightRanges(p.highlights,shown.length);
+  p.highlights=ranges;
+
+  if(!ranges.length){
+    body.textContent=shown;
+    return;
+  }
+
+  let cursor=0;
+  for(const r of ranges){
+    if(r.start>cursor){
+      body.appendChild(document.createTextNode(shown.slice(cursor,r.start)));
+    }
+
+    const span=document.createElement('span');
+    span.className='highlight-text';
+    span.style.setProperty('--hl-color',rgbaFromHighlightRange(r));
+
+    if(r.position==='lower'){
+      span.style.setProperty('--hl-start','52%');
+      span.style.setProperty('--hl-end','100%');
+    }else{
+      span.style.setProperty('--hl-start','0%');
+      span.style.setProperty('--hl-end','100%');
+    }
+
+    span.textContent=shown.slice(r.start,r.end);
+    body.appendChild(span);
+    cursor=r.end;
+  }
+
+  if(cursor<shown.length){
+    body.appendChild(document.createTextNode(shown.slice(cursor)));
+  }
+}
+
+function rememberHighlightSelection(){
+  const sel=window.getSelection();
+  if(!sel || !sel.rangeCount || sel.isCollapsed)return;
+
+  const range=sel.getRangeAt(0);
+  let node=range.commonAncestorContainer;
+  if(node.nodeType===Node.TEXT_NODE)node=node.parentElement;
+  const body=node?.closest?.('.block-text');
+  if(!body || !body.isContentEditable)return;
+
+  const wrap=body.closest('.block[data-id]');
+  const paragraphId=wrap?.dataset?.id;
+  if(!paragraphId)return;
+
+  const offsets=caretTextOffsets(body);
+  if(offsets.end<=offsets.start)return;
+
+  activeHighlightSelection={
+    paragraphId,
+    start:offsets.start,
+    end:offsets.end
+  };
+}
+
+document.addEventListener('selectionchange',rememberHighlightSelection);
+
+function wrapLinesWithOffsets(ctx,text,maxW,spacingPx=0){
+  const out=[];
+  const source=String(text??'');
+  let absolute=0;
+  const paras=source.split('\n');
+
+  paras.forEach((para,paraIndex)=>{
+    if(para===''){
+      out.push({text:'',start:absolute,end:absolute});
+    }else{
+      let line='';
+      let lineStart=absolute;
+      let cursor=absolute;
+
+      for(const ch of para){
+        const test=line+ch;
+        if(spacedTextWidth(ctx,test,spacingPx)>maxW && line){
+          out.push({text:line,start:lineStart,end:cursor});
+          line=ch;
+          lineStart=cursor;
+        }else{
+          line=test;
+        }
+        cursor+=ch.length;
+      }
+      if(line)out.push({text:line,start:lineStart,end:cursor});
+    }
+
+    absolute+=para.length;
+    if(paraIndex<paras.length-1)absolute+=1;
+  });
+
+  return out;
+}
+
+function drawHighlightRangesOnLine(ctx,{ranges,lineRange,lineText,x,y,font,letterPx,exportScale}){
+  if(!lineText || !ranges?.length || !lineRange)return;
+
+  for(const r of ranges){
+    const start=Math.max(r.start,lineRange.start);
+    const end=Math.min(r.end,lineRange.end);
+    if(end<=start)continue;
+
+    const localStart=start-lineRange.start;
+    const localEnd=end-lineRange.start;
+    const prefix=lineText.slice(0,localStart);
+    const selected=lineText.slice(localStart,localEnd);
+
+    let offset=spacedTextWidth(ctx,prefix,letterPx);
+    if(prefix && selected)offset+=letterPx;
+
+    const width=spacedTextWidth(ctx,selected,letterPx);
+    if(width<=0)continue;
+
+    ctx.fillStyle=rgbaFromHighlightRange(r);
+
+    let bandHeight;
+    let bandY;
+    if(r.position==='lower'){
+      bandHeight=Math.max(font*0.58,6*exportScale);
+      bandY=y+font*0.58;
+    }else{
+      bandHeight=Math.max(font*0.9,10*exportScale);
+      bandY=y+(font-bandHeight)/2;
+    }
+
+    ctx.fillRect(
+      x+offset,
+      bandY,
+      width,
+      bandHeight
+    );
+  }
+}
 
 function ratioLabel(){
   return state.exportRatio==='1:1'?'정방형':state.exportRatio;
@@ -3559,26 +3890,20 @@ function render(){  document.querySelector('.canvas-shell')?.classList.add('nove
     body.contentEditable='true';
     body.spellcheck=false;
     const shown=currentDisplayText(p);
-    if(p.effect==='highlight'){
-      const span=document.createElement('span');
-      span.className='highlight-text';
-      span.textContent=shown;
-      const hc=state.highlightColor||'#f3dfc5';
-      const hr=parseInt(hc.slice(1,3),16),hg=parseInt(hc.slice(3,5),16),hb=parseInt(hc.slice(5,7),16);
-      span.style.backgroundColor=`rgba(${hr},${hg},${hb},${state.highlightOpacity})`;
-      body.appendChild(span);
-    }else{
-      body.textContent=shown;
-    }
+    renderHighlightedText(body,p,shown);
 
     body.addEventListener('input',()=>{
       const value=body.innerText;
       /* 이름은 본문과 분리 표시 */
       p.text=stripNovelQuoteCharsKeepLayout(value);
+      p.highlights=[];
+      activeHighlightSelection=null;
       queuePersist();
     });
     body.addEventListener('compositionend',()=>{
       p.text=stripNovelQuoteCharsKeepLayout(body.innerText);
+      p.highlights=[];
+      activeHighlightSelection=null;
       queuePersist(60);
     });
     body.addEventListener('focus',()=>{state.activeEditId=p.id;});
@@ -3641,7 +3966,8 @@ function render(){  document.querySelector('.canvas-shell')?.classList.add('nove
         text:t,
         role:currentDefaultRole(),
         effect:'none',
-        override:{}
+        override:{},
+        highlights:[]
       }));
 
       added[added.length-1].text+=afterText;
@@ -3824,7 +4150,8 @@ function insertSoftLineBreak(blockId,el){
       text:right,
       role:currentDefaultRole(),
       effect:'none',
-      override:{}
+      override:{},
+      highlights:[]
     };
     arr.splice(idx+1,0,next);
     state.activeEditId=next.id;
@@ -3977,162 +4304,17 @@ function normalizeSiteHex(v){
 }
 
 function makeSiteColorControl(value,onApply,title='색상'){
-  const trigger=document.createElement('button');
-  trigger.type='button';
-  trigger.className='site-color-trigger';
-  trigger.title=title;
-  trigger.setAttribute('aria-label',title);
-  trigger.style.setProperty('--swatch',value||'#ffffff');
+  const input=document.createElement('input');
+  input.type='color';
+  input.value=/^#[0-9a-f]{6}$/i.test(String(value||''))?String(value):'#ffffff';
+  input.title=title;
+  input.setAttribute('aria-label',title);
 
-  trigger.onclick=(e)=>{
-    e.stopPropagation();
-    closeSiteColorPopover();
-
-    const rgb=hexToRgb(value||'#ffffff');
-    let hsv=rgbToHsv(rgb.r,rgb.g,rgb.b);
-
-    const pop=document.createElement('div');
-    pop.className='site-color-popover';
-
-    const canvas=document.createElement('canvas');
-    canvas.className='site-color-sv';
-    canvas.width=520;
-    canvas.height=290;
-
-    const svKnob=document.createElement('div');
-    svKnob.className='site-color-knob';
-    svKnob.style.position='absolute';
-    const svWrap=document.createElement('div');
-    svWrap.style.position='relative';
-    svWrap.append(canvas,svKnob);
-    pop.appendChild(svWrap);
-
-    const hue=document.createElement('div');
-    hue.className='site-color-hue';
-    const hueKnob=document.createElement('div');
-    hueKnob.className='site-color-knob';
-    hue.appendChild(hueKnob);
-    pop.appendChild(hue);
-
-    const row=document.createElement('div');
-    row.className='site-color-row';
-    const preview=document.createElement('div');
-    preview.className='site-color-preview';
-    const hex=document.createElement('input');
-    hex.className='site-color-hex';
-    hex.type='text';
-    hex.inputMode='text';
-    row.append(preview,hex);
-    pop.appendChild(row);
-
-    const actions=document.createElement('div');
-    actions.className='site-color-actions';
-    const cancel=document.createElement('button');
-    cancel.type='button';cancel.textContent='취소';
-    const apply=document.createElement('button');
-    apply.type='button';apply.textContent='적용';
-    actions.append(cancel,apply);
-    pop.appendChild(actions);
-
-    function currentHex(){
-      const c=hsvToRgb(hsv.h,hsv.s,hsv.v);
-      return rgbToHex(c.r,c.g,c.b);
-    }
-
-    function drawSV(){
-      const ctx=canvas.getContext('2d');
-      const hueRgb=hsvToRgb(hsv.h,1,1);
-      const base=rgbToHex(hueRgb.r,hueRgb.g,hueRgb.b);
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      const gx=ctx.createLinearGradient(0,0,canvas.width,0);
-      gx.addColorStop(0,'#fff');gx.addColorStop(1,base);
-      ctx.fillStyle=gx;ctx.fillRect(0,0,canvas.width,canvas.height);
-      const gy=ctx.createLinearGradient(0,0,0,canvas.height);
-      gy.addColorStop(0,'rgba(0,0,0,0)');gy.addColorStop(1,'#000');
-      ctx.fillStyle=gy;ctx.fillRect(0,0,canvas.width,canvas.height);
-    }
-
-    function syncUI(){
-      drawSV();
-      const hx=currentHex();
-      hex.value=hx.toUpperCase();
-      preview.style.setProperty('--swatch',hx);
-      svKnob.style.left=`${hsv.s*100}%`;
-      svKnob.style.top=`${(1-hsv.v)*100}%`;
-      hueKnob.style.left=`${(hsv.h/360)*100}%`;
-    }
-
-    function pointIn(el,ev){
-      const r=el.getBoundingClientRect();
-      return {
-        x:clamp01((ev.clientX-r.left)/r.width),
-        y:clamp01((ev.clientY-r.top)/r.height)
-      };
-    }
-
-    function bindDrag(el,move){
-      const handler=(ev)=>{
-        ev.preventDefault();
-        move(pointIn(el,ev));
-      };
-      el.addEventListener('pointerdown',ev=>{
-        el.setPointerCapture?.(ev.pointerId);
-        handler(ev);
-      });
-      el.addEventListener('pointermove',ev=>{
-        if(ev.buttons||ev.pressure>0)handler(ev);
-      });
-    }
-
-    bindDrag(canvas,p=>{
-      hsv.s=p.x;hsv.v=1-p.y;syncUI();
-    });
-    bindDrag(hue,p=>{
-      hsv.h=p.x*360;syncUI();
-    });
-
-    hex.onchange=()=>{
-      const valid=normalizeSiteHex(hex.value);
-      if(!valid){syncUI();return;}
-      const c=hexToRgb(valid);
-      hsv=rgbToHsv(c.r,c.g,c.b);
-      syncUI();
-    };
-    hex.onkeydown=ev=>{
-      if(ev.key==='Enter'){
-        ev.preventDefault();
-        const valid=normalizeSiteHex(hex.value);
-        if(valid){
-          onApply(valid);
-          closeSiteColorPopover();
-          queuePersist(0);
-          render();
-        }
-      }
-    };
-
-    cancel.onclick=()=>closeSiteColorPopover();
-    apply.onclick=()=>{
-      const hx=currentHex();
-      onApply(hx);
-      closeSiteColorPopover();
-      queuePersist(0);
-      render();
-    };
-
-    document.body.appendChild(pop);
-    const r=trigger.getBoundingClientRect();
-    const pw=pop.offsetWidth||286,ph=pop.offsetHeight||330;
-    let left=Math.max(8,Math.min(window.innerWidth-pw-8,r.left));
-    let top=r.bottom+6;
-    if(top+ph>window.innerHeight-8)top=Math.max(8,r.top-ph-6);
-    pop.style.left=`${left}px`;
-    pop.style.top=`${top}px`;
-    activeSiteColorPopover=pop;
-    syncUI();
-  };
-
-  return trigger;
+  // preview.html 방식처럼 브라우저 기본 색상표를 사용한다.
+  // 이 파일의 기존 콜백은 openSheet()까지 포함하므로,
+  // 드래그 중(input)에는 DOM을 재생성하지 않고 선택 완료(change)에만 적용한다.
+  input.onchange=()=>onApply(input.value);
+  return input;
 }
 
 async function ensureNovelFontsAvailable(){
@@ -4225,7 +4407,7 @@ function deleteCustomRolePreset(key){
 }
 
 function renderPresetSheet(p){
-  sheetContent.innerHTML=`<div class="sheet-title">${false?'대화 설정':'문단 설정'}</div>`;
+  sheetContent.innerHTML='';
 
   const miniBtn=(label,on,fn,extra='')=>{
     const b=document.createElement('button');
@@ -4854,71 +5036,225 @@ function renderPresetSheet(p){
 
   sheetContent.appendChild(roles);
 
+  // Selected paragraph overrides.
+  // These never mutate the preset. They only sit on top of it for this paragraph.
+  {
+    const individualLine=document.createElement('div');
+    individualLine.className='compact-line paragraph-override-line';
+
+    const individualLabel=document.createElement('div');
+    individualLabel.className='compact-label';
+    individualLabel.textContent='개별';
+
+    const individualTools=document.createElement('div');
+    individualTools.className='flow-row compact-fill paragraph-override-tools';
+
+    const computed=currentComputedStyle(p);
+
+    const boldBtn=miniBtn('B',computed.bold,()=>{
+      setParagraphOverride(p,'bold',!computed.bold);
+      render();
+      openSheet();
+    });
+    boldBtn.title='이 문단만 굵게';
+
+    const italicBtn=miniBtn('I',computed.italic,()=>{
+      setParagraphOverride(p,'italic',!computed.italic);
+      render();
+      openSheet();
+    });
+    italicBtn.title='이 문단만 기울임';
+
+    const leftBtn=miniBtn('좌',computed.align==='left',()=>{
+      setParagraphOverride(p,'align','left');
+      render();
+      openSheet();
+    });
+    leftBtn.title='이 문단만 왼쪽 정렬';
+
+    const centerBtn=miniBtn('중',computed.align==='center',()=>{
+      setParagraphOverride(p,'align','center');
+      render();
+      openSheet();
+    });
+    centerBtn.title='이 문단만 가운데 정렬';
+
+    const rightBtn=miniBtn('우',computed.align==='right',()=>{
+      setParagraphOverride(p,'align','right');
+      render();
+      openSheet();
+    });
+    rightBtn.title='이 문단만 오른쪽 정렬';
+
+    const paragraphFontWrap=document.createElement('div');
+    paragraphFontWrap.className='font-select-wrap';
+    const paragraphFont=document.createElement('select');
+    paragraphFont.className='font-select';
+    paragraphFont.setAttribute('aria-label','선택 문단 폰트');
+    NOVEL_FONTS.forEach(f=>{
+      const option=document.createElement('option');
+      option.value=f.key;
+      option.textContent=f.label;
+      option.selected=computed.font===f.key;
+      option.style.fontFamily=f.css;
+      paragraphFont.appendChild(option);
+    });
+    paragraphFont.style.fontFamily=fontCss(computed.font);
+    paragraphFont.onchange=()=>{
+      setParagraphOverride(p,'font',paragraphFont.value);
+      render();
+      openSheet();
+    };
+    paragraphFontWrap.appendChild(paragraphFont);
+
+    const paragraphColor=document.createElement('span');
+    paragraphColor.className='mini-color';
+    paragraphColor.title='이 문단만 글자색';
+    paragraphColor.appendChild(makeSiteColorControl(computed.color,(hex)=>{
+      setParagraphOverride(p,'color',hex);
+      render();
+      openSheet();
+    },'선택 문단 글자색'));
+
+    const resetOverride=document.createElement('button');
+    resetOverride.type='button';
+    resetOverride.className='mini-tool paragraph-preset-reset'+(paragraphHasOverrides(p)?' on':'');
+    resetOverride.textContent='↺';
+    resetOverride.title='이 문단을 프리셋 설정으로 되돌리기';
+    resetOverride.setAttribute('aria-label','선택 문단을 프리셋으로 되돌리기');
+    resetOverride.onclick=()=>{
+      p.override={};
+      render();
+      openSheet();
+    };
+
+    individualTools.append(
+      boldBtn,
+      italicBtn,
+      leftBtn,
+      centerBtn,
+      rightBtn,
+      paragraphFontWrap,
+      paragraphColor,
+      resetOverride
+    );
+
+    individualLine.append(individualLabel,individualTools);
+    sheetContent.appendChild(individualLine);
+  }
+
   const divider1=document.createElement('div');
   divider1.className='compact-divider';
   sheetContent.appendChild(divider1);
 
   const effectLine=document.createElement('div');
-  effectLine.className='compact-line';
+  effectLine.className='compact-line highlight-inline-line';
+
   const effectLabel=document.createElement('div');
   effectLabel.className='compact-label';
   effectLabel.textContent='효과';
+
   const effectGroup=document.createElement('div');
-  effectGroup.className='flow-row compact-fill';
-  [['없음','none'],['강조','emphasis'],['인용','quote'],['하이라이트','highlight']].forEach(([l,v])=>{
-    effectGroup.appendChild(chip(l,p.effect===v,()=>{p.effect=v;render();openSheet();}));
+  effectGroup.className='flow-row compact-fill highlight-inline-tools';
+
+  const addHl=chip('하이라이트',false,()=>{
+    const s=activeHighlightSelection;
+    if(!s || s.paragraphId!==p.id || s.end<=s.start){
+      showToast('본문에서 원하는 부분을 먼저 드래그하세요');
+      return;
+    }
+    addHighlightRange(p,s.start,s.end);
+    activeHighlightSelection=null;
+    queuePersist(0);
+    render();
+    openSheet();
   });
+
+  const removeHl=chip('지우기',false,()=>{
+    const s=activeHighlightSelection;
+    if(!s || s.paragraphId!==p.id || s.end<=s.start){
+      showToast('지울 부분을 먼저 드래그하세요');
+      return;
+    }
+    removeHighlightRange(p,s.start,s.end);
+    activeHighlightSelection=null;
+    queuePersist(0);
+    render();
+    openSheet();
+  });
+
+  const hlColor=document.createElement('span');
+  hlColor.className='mini-color';
+  hlColor.title='하이라이트 색';
+  hlColor.appendChild(makeSiteColorControl(state.highlightColor||'#f3dfc5',(hex)=>{
+    state.highlightColor=hex;
+    render();
+    openSheet();
+  },'하이라이트 색'));
+
+  const opacityMinus=document.createElement('button');
+  opacityMinus.type='button';
+  opacityMinus.className='mini-tool';
+  opacityMinus.textContent='−';
+  opacityMinus.title='투명도 낮추기';
+  opacityMinus.onclick=()=>{
+    state.highlightOpacity=Math.max(0.1,Math.round((state.highlightOpacity-0.1)*10)/10);
+    render();
+    openSheet();
+  };
+
+  const opacityValue=document.createElement('span');
+  opacityValue.className='opacity-value';
+  opacityValue.textContent=`${Math.round(state.highlightOpacity*100)}%`;
+
+  const opacityPlus=document.createElement('button');
+  opacityPlus.type='button';
+  opacityPlus.className='mini-tool';
+  opacityPlus.textContent='+';
+  opacityPlus.title='투명도 높이기';
+  opacityPlus.onclick=()=>{
+    state.highlightOpacity=Math.min(1,Math.round((state.highlightOpacity+0.1)*10)/10);
+    render();
+    openSheet();
+  };
+
+  const positionDefault=document.createElement('button');
+  positionDefault.type='button';
+  positionDefault.className='mini-tool '+(state.highlightPosition!=='lower'?'on':'');
+  positionDefault.textContent='▰';
+  positionDefault.title='기본';
+  positionDefault.setAttribute('aria-label','하이라이트 기본 위치');
+  positionDefault.onclick=()=>{
+    state.highlightPosition='default';
+    render();
+    openSheet();
+  };
+
+  const positionLower=document.createElement('button');
+  positionLower.type='button';
+  positionLower.className='mini-tool '+(state.highlightPosition==='lower'?'on':'');
+  positionLower.textContent='▂';
+  positionLower.title='아래반줄';
+  positionLower.setAttribute('aria-label','하이라이트 아래반줄 위치');
+  positionLower.onclick=()=>{
+    state.highlightPosition='lower';
+    render();
+    openSheet();
+  };
+
+  effectGroup.append(
+    addHl,
+    removeHl,
+    hlColor,
+    opacityMinus,
+    opacityValue,
+    opacityPlus,
+    positionDefault,
+    positionLower
+  );
+
   effectLine.append(effectLabel,effectGroup);
   sheetContent.appendChild(effectLine);
-
-  if(p.effect==='highlight'){
-    const hlLine=document.createElement('div');
-    hlLine.className='compact-line highlight-setting-line';
-
-    const hlLabel=document.createElement('div');
-    hlLabel.className='compact-label';
-    hlLabel.textContent='형광';
-
-    const hlTools=document.createElement('div');
-    hlTools.className='flow-row compact-fill';
-
-    const hlColor=document.createElement('span');
-    hlColor.className='mini-color';
-    hlColor.title='하이라이트 색';
-    hlColor.appendChild(makeSiteColorControl(state.highlightColor||'#f3dfc5',(hex)=>{
-      state.highlightColor=hex;
-      render();
-      openSheet();
-    },'하이라이트 색'));
-
-    const hlMinus=document.createElement('button');
-    hlMinus.type='button';
-    hlMinus.className='mini-tool';
-    hlMinus.textContent='−';
-    hlMinus.onclick=()=>{
-      state.highlightOpacity=Math.max(0.1,Math.round((state.highlightOpacity-0.1)*10)/10);
-      render();
-      openSheet();
-    };
-
-    const hlValue=document.createElement('span');
-    hlValue.className='opacity-value';
-    hlValue.textContent=`${Math.round(state.highlightOpacity*100)}%`;
-
-    const hlPlus=document.createElement('button');
-    hlPlus.type='button';
-    hlPlus.className='mini-tool';
-    hlPlus.textContent='+';
-    hlPlus.onclick=()=>{
-      state.highlightOpacity=Math.min(1,Math.round((state.highlightOpacity+0.1)*10)/10);
-      render();
-      openSheet();
-    };
-
-    hlTools.append(hlColor,hlMinus,hlValue,hlPlus);
-    hlLine.append(hlLabel,hlTools);
-    sheetContent.appendChild(hlLine);
-  }
 
   const divider2=document.createElement('div');
   divider2.className='compact-divider';
@@ -5064,7 +5400,12 @@ function moveSelected(dir){
 function duplicateSelected(){
   const arr=currentList();const i=arr.findIndex(x=>x.id===state.selectedId);
   if(i<0)return;
-  const copy={...arr[i],id:id(),override:{...(arr[i].override||{})}};
+  const copy={
+    ...arr[i],
+    id:id(),
+    override:{...(arr[i].override||{})},
+    highlights:(arr[i].highlights||[]).map(r=>({...r}))
+  };
   arr.splice(i+1,0,copy);state.selectedId=copy.id;render();openSheet()
 }
 function selectNextParagraph(){
@@ -5697,7 +6038,8 @@ function drawExport(pageNumber=0){
     const avatarGap=profile?8*exportScale:0;
     const textMaxW=maxW-avatarSize-avatarGap;
     const letterPx=font*state.novelLetterSpacing;
-    const lines=wrapLines(ctx,shown,textMaxW,letterPx);
+    const lineRanges=wrapLinesWithOffsets(ctx,shown,textMaxW,letterPx);
+    const lines=lineRanges.map(x=>x.text);
     const lh=Math.round(font*state.novelLineHeight);
     const name=String(preset.name||'').trim();
     const nameScale=Number(preset.nameScale)||0.62;
@@ -5713,7 +6055,7 @@ function drawExport(pageNumber=0){
     blocks.push({
       p,
       st:{...st,color:cssColorForExport(previewVisual?.textColor,st.color)},
-      font,family,weight,italic,lines,lh,h,letterPx,profile,avatarSize,avatarGap,
+      font,family,weight,italic,lines,lineRanges,lh,h,letterPx,profile,avatarSize,avatarGap,
       name,
       nameColor:cssColorForExport(previewVisual?.nameColor,preset.nameColor||'#777777'),
       nameOpacity:Number.isFinite(previewVisual?.nameOpacity)?previewVisual.nameOpacity:.68,
@@ -5746,7 +6088,6 @@ function drawExport(pageNumber=0){
   for(const b of blocks){
     ctx.font=`${b.italic}${b.weight} ${b.font}px ${b.family}`;
     ctx.fillStyle=b.st.color;ctx.textAlign='left';
-    if(b.p.effect==='quote')ctx.fillRect(padLeft-18*exportScale,y,3*exportScale,b.h);
 
     let avatarOffset=0;
     const avatarOnRight=!!(b.profile && b.st.align==='right');
@@ -5813,16 +6154,17 @@ function drawExport(pageNumber=0){
         x=areaLeft+(areaW-tw)/2;
       }
       if(b.st.align==='right')x=areaRight-tw-(b.bubble?b.bubblePadX:0);
-      if(b.p.effect==='highlight'&&ln){
-        const lineW=spacedTextWidth(ctx,ln,b.letterPx);
-        if(b.highlightColor){
-          ctx.fillStyle=b.highlightColor;
-        }else{
-          const hc=state.highlightColor||'#f3dfc5';
-          const hr=parseInt(hc.slice(1,3),16),hg=parseInt(hc.slice(3,5),16),hb=parseInt(hc.slice(5,7),16);
-          ctx.fillStyle=`rgba(${hr},${hg},${hb},${state.highlightOpacity})`;
-        }
-        ctx.fillRect(x-3*exportScale,textTop+i*b.lh-2*exportScale,lineW+6*exportScale,b.font+10*exportScale);
+      if(ln && Array.isArray(b.p.highlights) && b.p.highlights.length){
+        drawHighlightRangesOnLine(ctx,{
+          ranges:normalizeHighlightRanges(b.p.highlights,currentDisplayText(b.p).length),
+          lineRange:b.lineRanges[i],
+          lineText:ln,
+          x,
+          y:textTop+i*b.lh,
+          font:b.font,
+          letterPx:b.letterPx,
+          exportScale
+        });
         ctx.fillStyle=b.st.color;
       }
       drawSpacedText(ctx,ln,x,textTop+i*b.lh,b.letterPx);
